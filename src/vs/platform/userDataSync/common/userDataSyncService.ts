@@ -3,14 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IUserDataSyncService, SyncStatus, ISynchroniser, IUserDataSyncStoreService, SyncSource } from 'vs/platform/userDataSync/common/userDataSync';
+import { IUserDataSyncService, SyncStatus, ISynchroniser, IUserDataSyncStoreService, SyncSource, IUserDataAuthTokenService } from 'vs/platform/userDataSync/common/userDataSync';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { SettingsSynchroniser } from 'vs/platform/userDataSync/common/settingsSync';
 import { Emitter, Event } from 'vs/base/common/event';
 import { ExtensionsSynchroniser } from 'vs/platform/userDataSync/common/extensionsSync';
 import { IExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
-import { IAuthTokenService, AuthTokenStatus } from 'vs/platform/auth/common/auth';
 import { KeybindingsSynchroniser } from 'vs/platform/userDataSync/common/keybindingsSync';
 
 export class UserDataSyncService extends Disposable implements IUserDataSyncService {
@@ -36,7 +35,7 @@ export class UserDataSyncService extends Disposable implements IUserDataSyncServ
 	constructor(
 		@IUserDataSyncStoreService private readonly userDataSyncStoreService: IUserDataSyncStoreService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IAuthTokenService private readonly authTokenService: IAuthTokenService,
+		@IUserDataAuthTokenService private readonly userDataAuthTokenService: IUserDataAuthTokenService,
 	) {
 		super();
 		this.settingsSynchroniser = this._register(this.instantiationService.createInstance(SettingsSynchroniser));
@@ -47,7 +46,7 @@ export class UserDataSyncService extends Disposable implements IUserDataSyncServ
 
 		if (this.userDataSyncStoreService.userDataSyncStore) {
 			this._register(Event.any(...this.synchronisers.map(s => Event.map(s.onDidChangeStatus, () => undefined)))(() => this.updateStatus()));
-			this._register(authTokenService.onDidChangeStatus(() => this.onDidChangeAuthTokenStatus()));
+			this._register(this.userDataAuthTokenService.onDidChangeToken(e => this.onDidChangeAuthTokenStatus(e)));
 		}
 
 		this.onDidChangeLocal = Event.any(...this.synchronisers.map(s => s.onDidChangeLocal));
@@ -57,7 +56,7 @@ export class UserDataSyncService extends Disposable implements IUserDataSyncServ
 		if (!this.userDataSyncStoreService.userDataSyncStore) {
 			throw new Error('Not enabled');
 		}
-		if (this.authTokenService.status === AuthTokenStatus.SignedOut) {
+		if (!(await this.userDataAuthTokenService.getToken())) {
 			throw new Error('Not Authenticated. Please sign in to start sync.');
 		}
 		for (const synchroniser of this.synchronisers) {
@@ -119,8 +118,8 @@ export class UserDataSyncService extends Disposable implements IUserDataSyncServ
 		return null;
 	}
 
-	private onDidChangeAuthTokenStatus(): void {
-		if (this.authTokenService.status === AuthTokenStatus.SignedOut) {
+	private onDidChangeAuthTokenStatus(token: string | undefined): void {
+		if (!token) {
 			this.stop();
 		}
 	}
